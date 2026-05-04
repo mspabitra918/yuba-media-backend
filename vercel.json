@@ -1,25 +1,11 @@
 {
-  "version": 2,
-  "buildCommand": "yarn build",
-  "outputDirectory": "dist",
-  "builds": [
-    {
-      "src": "dist/main.js",
-      "use": "@vercel/node",
-      "config": {
-        "includeFiles": [
-          "node_modules/pg/**",
-          "node_modules/pg-hstore/**",
-          "node_modules/sequelize/**",
-          "node_modules/sequelize-typescript/**"
-        ]
-      }
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": {
+    "api/index.ts": {
+      "includeFiles": "src/**"
     }
-  ],
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "dist/main.js"
-    }
+  },
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/index" }
   ]
 }

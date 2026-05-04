@@ -9,7 +9,7 @@ import {
 } from "@nestjs/common";
 import { LeadsService } from "./leads.service";
 import { CreateLeadDto } from "./dto/create-lead.dto";
-import { RolesGuard } from "src/common/guards/roles.guard";
+import { RolesGuard } from "../common/guards/roles.guard";
 
 @Controller("leads")
 export class LeadsController {

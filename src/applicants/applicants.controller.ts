@@ -19,8 +19,8 @@ import { extname } from "path";
 
 import { ApplicantsService } from "./applicants.service";
 import { CreateApplicantDto } from "./dto/create-applicant.dto";
-import { RolesGuard } from "src/auth/admin.guard";
-import { UploadService } from "src/upload/upload.service";
+import { RolesGuard } from "../auth/admin.guard";
+import { UploadService } from "../upload/upload.service";
 
 @Controller("applicants")
 export class ApplicantsController {

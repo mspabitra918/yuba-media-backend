@@ -3,6 +3,7 @@ dist
 dist 2
 dist/
 dist 2/
+dist 3/
 .env
 uploads/*
 !uploads/.gitkeep

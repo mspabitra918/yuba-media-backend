@@ -40,17 +40,12 @@ export class ApplicantsController {
     @Body() body: CreateApplicantDto,
     @UploadedFile() cv: Express.Multer.File,
   ) {
-    try {
-      const applicant = await this.applicants.create(body, cv);
-      return {
-        ok: true,
-        id: applicant.id,
-        message: "Application received.",
-      };
-    } catch (error) {
-      console.log("Error creating applicant:", error);
-      throw new InternalServerErrorException("Error creating applicant.");
-    }
+    const applicant = await this.applicants.create(body, cv);
+    return {
+      ok: true,
+      id: applicant.id,
+      message: "Application received.",
+    };
   }
 
   @Get() // collect all applicant

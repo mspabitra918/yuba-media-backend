@@ -29,8 +29,8 @@ export class MailService {
   }
 
   private async send(payload: MailMessage): Promise<void> {
+    this.logger.log(`Attempting to send email to ${payload.to}...`);
     try {
-      this.logger.log(`Attempting to send email to ${payload.to}...`);
       const response = await this.mailgun.messages.create(this.domain, {
         from: this.config.get<string>(
           "MAILGUN_FROM",
@@ -51,6 +51,7 @@ export class MailService {
       if (err.details) {
         this.logger.error(`Error details: ${err.details}`);
       }
+      throw err;
     }
   }
 

@@ -5,12 +5,12 @@ import {
   Logger,
   NotFoundException,
 } from "@nestjs/common";
-import { InjectModel } from "@nestjs/sequelize";
+import { InjectConnection, InjectModel } from "@nestjs/sequelize";
+import { Op, Sequelize } from "sequelize";
 import { Applicant, ApplicantStatus } from "./applicant.model";
 import { CreateApplicantDto } from "./dto/create-applicant.dto";
 import { MailService } from "../mail/mail.service";
 import { MAX_CV_BYTES, UploadService } from "../upload/upload.service";
-import { Op } from "sequelize";
 
 const VALID_STATUSES: ApplicantStatus[] = [
   "new",
@@ -25,6 +25,7 @@ export class ApplicantsService {
 
   constructor(
     @InjectModel(Applicant) private readonly model: typeof Applicant,
+    @InjectConnection() private readonly sequelize: Sequelize,
     private readonly upload: UploadService,
     private readonly mail: MailService,
   ) {}
@@ -53,48 +54,55 @@ export class ApplicantsService {
       );
     }
 
+    const transaction = await this.sequelize.transaction();
     try {
-      const applicant = await this.model.create({
-        fullName: dto.fullName,
-        email: dto.email,
-        phone: dto.phone,
-        position: dto.position,
-        experience: dto.experience,
-        location: dto.location,
-        cvUrl,
-        coverLetter: dto.coverLetter ?? null,
-        linkedinUrl: dto.linkedinUrl ?? null,
-        availability: dto.availability ?? null,
-        status: "new",
-      } as Partial<Applicant> as Applicant);
+      const applicant = await this.model.create(
+        {
+          fullName: dto.fullName,
+          email: dto.email,
+          phone: dto.phone,
+          position: dto.position,
+          experience: dto.experience,
+          location: dto.location,
+          cvUrl,
+          coverLetter: dto.coverLetter ?? null,
+          linkedinUrl: dto.linkedinUrl ?? null,
+          availability: dto.availability ?? null,
+          status: "new",
+        } as Partial<Applicant> as Applicant,
+        { transaction },
+      );
 
-      try {
-        const careersInbox =
-          process.env.CAREERS_INBOX || "careers@yubamedia.com";
-        await Promise.all([
-          this.mail.sendApplicantConfirmation(
-            applicant.email,
-            applicant.fullName,
-            applicant.position,
-          ),
-          this.mail.sendApplicantAlert(
-            careersInbox,
-            applicant.fullName,
-            applicant.position,
-            applicant.id,
-          ),
-        ]);
-      } catch (mailErr) {
-        this.logger.warn(
-          `Applicant saved but email failed: ${(mailErr as Error).message}`,
-        );
-      }
+      const careersInbox =
+        process.env.CAREERS_INBOX || "careers@yubamedia.com";
+      await Promise.all([
+        this.mail.sendApplicantConfirmation(
+          applicant.email,
+          applicant.fullName,
+          applicant.position,
+        ),
+        this.mail.sendApplicantAlert(
+          careersInbox,
+          applicant.fullName,
+          applicant.position,
+          applicant.id,
+        ),
+      ]);
 
+      await transaction.commit();
       return applicant;
     } catch (err) {
-      this.logger.error("Failed to create applicant", err as Error);
+      await transaction.rollback().catch((rollbackErr) => {
+        this.logger.error(
+          "Transaction rollback failed",
+          rollbackErr as Error,
+        );
+      });
+      await this.upload.deleteCv(cvUrl);
+
+      this.logger.error("Applicant creation failed", err as Error);
       throw new InternalServerErrorException(
-        "Could not save your application. Please try again.",
+        "Could not complete your application. Please try again.",
       );
     }
   }

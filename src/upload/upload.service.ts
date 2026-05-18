@@ -66,6 +66,21 @@ export class UploadService {
     return objectKey;
   }
 
+  async deleteCv(objectKey: string): Promise<void> {
+    const { error } = await this.client.storage
+      .from(this.bucket)
+      .remove([objectKey]);
+
+    if (error) {
+      this.logger.error(
+        `Supabase delete failed for ${objectKey}: ${error.message}`,
+      );
+      return;
+    }
+
+    this.logger.log(`Deleted CV ← ${this.bucket}/${objectKey}`);
+  }
+
   async getSignedUrl(
     objectKey: string,
     expiresInSec = 60 * 5,

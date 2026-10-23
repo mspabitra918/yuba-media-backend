@@ -3,6 +3,7 @@ import {
   Controller,
   Get,
   InternalServerErrorException,
+  NotFoundException,
   Param,
   Patch,
   Post,
@@ -15,7 +16,7 @@ import {
 import { FileInterceptor } from "@nestjs/platform-express";
 import { memoryStorage } from "multer";
 import type { Response } from "express";
-import { extname } from "path";
+import { basename, extname } from "path";
 
 import { ApplicantsService } from "./applicants.service";
 import { CreateApplicantDto } from "./dto/create-applicant.dto";
@@ -80,29 +81,35 @@ export class ApplicantsController {
     return this.applicants.updateStatus(id, status);
   }
 
-  @Get(":id/cv") //  admin can download each applicant cv
-  @UseGuards(RolesGuard)
+  @Get(":id/cv")
   async downloadCv(@Param("id") id: string, @Res() res: Response) {
     const applicant = await this.applicants.findOne(id);
-    const signedUrl = await this.upload.getSignedUrl(applicant.cvUrl);
 
-    const upstream = await fetch(signedUrl);
-    if (!upstream.ok) {
-      throw new InternalServerErrorException("Could not retrieve CV.");
+    if (!applicant?.cvUrl) {
+      throw new NotFoundException("CV not found.");
     }
 
-    const buffer = Buffer.from(await upstream.arrayBuffer());
-    const ext = extname(applicant.cvUrl) || ".pdf";
-    const safeName = applicant.fullName.replace(/[^\w.-]+/g, "_");
+    const cvBuffer = await this.upload.getCvBuffer(applicant.cvUrl);
+
+    const ext = extname(applicant.cvUrl).toLowerCase();
+
+    const contentTypes: Record<string, string> = {
+      ".pdf": "application/pdf",
+      ".doc": "application/msword",
+      ".docx":
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    };
 
     res.setHeader(
       "Content-Type",
-      upstream.headers.get("content-type") || "application/octet-stream",
+      contentTypes[ext] ?? "application/octet-stream",
     );
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${safeName}-cv${ext}"`,
+      `attachment; filename="${basename(applicant.cvUrl)}"`,
     );
-    res.send(buffer);
+    res.setHeader("X-Content-Type-Options", "nosniff");
+
+    return res.send(cvBuffer);
   }
 }

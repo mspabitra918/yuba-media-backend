@@ -2,10 +2,15 @@ import {
   Injectable,
   Logger,
   InternalServerErrorException,
+  NotFoundException,
 } from "@nestjs/common";
-import { extname } from "path";
+import { extname, join, basename } from "path";
 import { randomUUID } from "crypto";
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { existsSync, mkdirSync, writeFile, unlink } from "fs";
+import { promisify } from "util";
+
+const writeFileAsync = promisify(writeFile);
+const unlinkAsync = promisify(unlink);
 
 const ALLOWED_MIME = new Set([
   "application/pdf",
@@ -20,83 +25,109 @@ export const MAX_CV_BYTES = 5 * 1024 * 1024;
 @Injectable()
 export class UploadService {
   private readonly logger = new Logger(UploadService.name);
-  private readonly client: SupabaseClient;
-  private readonly bucket: string;
+
+  private readonly uploadDir = join(process.cwd(), "uploads", "cvs");
 
   constructor() {
-    const url = process.env.SUPABASE_URL;
-    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-    this.bucket = process.env.SUPABASE_CV_BUCKET || "applicant-cvs";
-
-    if (!url || !key) {
-      throw new Error(
-        "Supabase storage is not configured. Set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.",
-      );
-    }
-
-    this.client = createClient(url, key, {
-      auth: { persistSession: false },
-    });
+    // Create the directory if it doesn't exist.
+    mkdirSync(this.uploadDir, { recursive: true });
   }
 
   isAllowed(file: Express.Multer.File): boolean {
+    if (!file?.originalname || !file?.mimetype) {
+      return false;
+    }
+
     const ext = extname(file.originalname).toLowerCase();
-    return ALLOWED_MIME.has(file.mimetype) && ALLOWED_EXT.has(ext);
+
+    return (
+      ALLOWED_MIME.has(file.mimetype) &&
+      ALLOWED_EXT.has(ext) &&
+      file.size <= MAX_CV_BYTES
+    );
   }
 
   async saveCv(file: Express.Multer.File): Promise<string> {
+    if (!this.isAllowed(file)) {
+      throw new InternalServerErrorException(
+        "Invalid CV file. Only PDF, DOC, and DOCX files up to 5 MB are allowed.",
+      );
+    }
+
     const ext = extname(file.originalname).toLowerCase();
     const objectKey = `${Date.now()}-${randomUUID()}${ext}`;
+    const filePath = join(this.uploadDir, objectKey);
 
-    const { error } = await this.client.storage
-      .from(this.bucket)
-      .upload(objectKey, file.buffer, {
-        contentType: file.mimetype,
-        upsert: false,
+    try {
+      await writeFileAsync(filePath, file.buffer, {
+        flag: "wx",
+        mode: 0o600,
       });
 
-    if (error) {
-      this.logger.error(`Supabase upload failed: ${error.message}`);
+      this.logger.log(`CV saved locally: ${objectKey}`);
+
+      // Store this returned key in your database.
+      return objectKey;
+    } catch (error) {
+      this.logger.error(
+        `Local CV upload failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
+      );
+
       throw new InternalServerErrorException(
         "Could not store the uploaded file.",
       );
     }
+  }
 
-    this.logger.log(`Uploaded CV → ${this.bucket}/${objectKey}`);
-    return objectKey;
+  getCvPath(objectKey: string): string {
+    // Accept only generated CV filenames, not arbitrary paths.
+    const filename = basename(objectKey);
+
+    if (
+      filename !== objectKey ||
+      !/^\d+-[0-9a-f-]+\.(pdf|doc|docx)$/i.test(filename)
+    ) {
+      throw new NotFoundException("CV not found.");
+    }
+
+    return join(this.uploadDir, filename);
   }
 
   async deleteCv(objectKey: string): Promise<void> {
-    const { error } = await this.client.storage
-      .from(this.bucket)
-      .remove([objectKey]);
+    const filePath = this.getCvPath(objectKey);
 
-    if (error) {
-      this.logger.error(
-        `Supabase delete failed for ${objectKey}: ${error.message}`,
+    try {
+      await unlinkAsync(filePath);
+      this.logger.log(`Deleted local CV: ${objectKey}`);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new NotFoundException("CV not found.");
+      }
+
+      this.logger.error(`Could not delete CV: ${objectKey}`);
+
+      throw new InternalServerErrorException(
+        "Could not delete the uploaded file.",
       );
-      return;
     }
-
-    this.logger.log(`Deleted CV ← ${this.bucket}/${objectKey}`);
   }
 
-  async getSignedUrl(
-    objectKey: string,
-    expiresInSec = 60 * 5,
-  ): Promise<string> {
-    const { data, error } = await this.client.storage
-      .from(this.bucket)
-      .createSignedUrl(objectKey, expiresInSec);
+  async getCvBuffer(objectKey: string): Promise<Buffer> {
+    const filePath = this.getCvPath(objectKey);
 
-    if (error || !data) {
-      this.logger.error(
-        `Could not create signed URL: ${error?.message ?? "unknown error"}`,
-      );
+    try {
+      const { readFile } = await import("fs/promises");
+      return await readFile(filePath);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new NotFoundException("CV not found.");
+      }
+
       throw new InternalServerErrorException(
-        "Could not generate CV download URL.",
+        "Could not read the uploaded file.",
       );
     }
-    return data.signedUrl;
   }
 }

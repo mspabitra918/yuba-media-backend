@@ -13,7 +13,7 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, new ExpressAdapter(server));
 
   app.enableCors({
-    origin: process.env.CORS_ORIGIN?.split(",") ?? ["http://localhost:3000"],
+    origin: process.env.CORS_ORIGIN?.split(",") ?? ["https://yubamedia.com"],
     credentials: true,
   });
 

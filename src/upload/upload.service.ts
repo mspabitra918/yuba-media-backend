@@ -8,6 +8,7 @@ import { extname, join, basename } from "path";
 import { randomUUID } from "crypto";
 import { existsSync, mkdirSync, writeFile, unlink } from "fs";
 import { promisify } from "util";
+import { tmpdir } from "os";
 
 const writeFileAsync = promisify(writeFile);
 const unlinkAsync = promisify(unlink);
@@ -26,7 +27,10 @@ export const MAX_CV_BYTES = 5 * 1024 * 1024;
 export class UploadService {
   private readonly logger = new Logger(UploadService.name);
 
-  private readonly uploadDir = join(process.cwd(), "uploads", "cvs");
+  // Vercel's filesystem is read-only except for /tmp.
+  private readonly uploadDir = process.env.VERCEL
+    ? join(tmpdir(), "uploads", "cvs")
+    : join(process.cwd(), "uploads", "cvs");
 
   constructor() {
     // Create the directory if it doesn't exist.
